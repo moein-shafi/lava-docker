@@ -1,0 +1,74 @@
+version: '3.4'
+services:
+
+  database:
+    image: postgres:9.6
+    container_name: lava_postgres
+    environment:
+      POSTGRES_USER: lavaserver
+      POSTGRES_PASSWORD: mysecretpassword
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  squid:
+    image: datadog/squid
+    container_name: lava_squid
+    volumes:
+      - squid:/var/spool/squid
+      - ./squid/squid.conf:/etc/squid/squid.conf
+    ports:
+      - 3128:3128
+
+  server:
+    image: lavasoftware/lava-server:2019.12
+
+    container_name: lava_server
+    ports:
+      - 80:80
+    volumes:
+      # Job artifact storage
+      - joboutput:/var/lib/lava-server/default/media/job-output
+
+      # server configuration files and directories
+      - ./server-overlay/etc/lava-server/settings.conf:/etc/lava-server/settings.conf
+      - ./server-overlay/etc/lava-server/instance.conf:/etc/lava-server/instance.conf
+      - ./server-overlay/etc/lava-server/dispatcher-config/health-checks:/etc/lava-server/dispatcher-config/health-checks
+      - ./server-overlay/etc/lava-server/dispatcher-config/devices:/etc/lava-server/dispatcher-config/devices
+      - ./server-overlay/etc/lava-server/env.yaml:/etc/lava-server/env.yaml
+
+      # provisioning script to add users and boards
+      - ./server-overlay/root/entrypoint.d/provision.sh:/root/entrypoint.d/provision.sh
+      # chown script to handle lava-server file permissions
+      - ./server-overlay/root/entrypoint.d/chown-files.sh:/root/entrypoint.d/chown-files.sh
+
+    depends_on:
+      - database
+
+  dispatcher:
+    image: lavasoftware/lava-dispatcher:2019.12
+    container_name: lava_dispatcher
+    devices:
+      - /dev/kvm # needed for QEMU
+      - /dev/net/tun # needed for QEMU
+    cap_add:
+      - NET_ADMIN # needed for QEMU
+    environment:
+      - "DISPATCHER_HOSTNAME=--hostname=dispatcher"
+      - "LOGGER_URL=tcp://server:5555" # url to send logs
+      - "MASTER_URL=tcp://server:5556" # url of lava master
+    volumes:
+      - '/boot:/boot:ro'
+      - '/lib/modules:/lib/modules:ro'
+
+volumes:
+  # postgres data volume
+  pgdata:
+    name: lava-server-pgdata
+
+  # squid cache volume
+  squid:
+    name: lava-squid-cache
+
+  # lava-server job artifact volume
+  joboutput:
+    name: lava-server-job-output
